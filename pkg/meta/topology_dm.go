@@ -16,8 +16,6 @@ package meta
 import (
 	"fmt"
 	"path/filepath"
-	"reflect"
-	"strings"
 
 	"github.com/creasty/defaults"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/api"
@@ -231,7 +229,7 @@ func (topo *DMTopologySpecification) UnmarshalYAML(unmarshal func(interface{}) e
 			fmt.Sprintf("%s-%d", RoleMonitor, topo.MonitoredOptions.NodeExporterPort))
 	}
 
-	if err := fillDMCustomDefaults(&topo.GlobalOptions, topo); err != nil {
+	if err := fillCustomDefaults(&topo.GlobalOptions, topo); err != nil {
 		return err
 	}
 
@@ -263,126 +261,4 @@ func (topo *DMTopologySpecification) Merge(topoThat Specification) Specification
 		Grafana:          append(topo.Grafana, that.Grafana...),
 		Alertmanager:     append(topo.Alertmanager, that.Alertmanager...),
 	}
-}
-
-// fillDefaults tries to fill custom fields to their default values
-func fillDMCustomDefaults(globalOptions *GlobalOptions, data interface{}) error {
-	v := reflect.ValueOf(data).Elem()
-	t := v.Type()
-
-	var err error
-	for i := 0; i < t.NumField(); i++ {
-		if err = setDMCustomDefaults(globalOptions, v.Field(i)); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func setDMCustomDefaults(globalOptions *GlobalOptions, field reflect.Value) error {
-	if !field.CanSet() || isSkipField(field) {
-		return nil
-	}
-
-	switch field.Kind() {
-	case reflect.Slice:
-		for i := 0; i < field.Len(); i++ {
-			if err := setDMCustomDefaults(globalOptions, field.Index(i)); err != nil {
-				return err
-			}
-		}
-	case reflect.Struct:
-		ref := reflect.New(field.Type())
-		ref.Elem().Set(field)
-		if err := fillDMCustomDefaults(globalOptions, ref.Interface()); err != nil {
-			return err
-		}
-		field.Set(ref.Elem())
-	case reflect.Ptr:
-		if err := setDMCustomDefaults(globalOptions, field.Elem()); err != nil {
-			return err
-		}
-	}
-
-	if field.Kind() != reflect.Struct {
-		return nil
-	}
-
-	for j := 0; j < field.NumField(); j++ {
-		switch field.Type().Field(j).Name {
-		case "SSHPort":
-			if field.Field(j).Int() != 0 {
-				continue
-			}
-			field.Field(j).Set(reflect.ValueOf(globalOptions.SSHPort))
-		case "Name":
-			if field.Field(j).String() != "" {
-				continue
-			}
-			host := field.FieldByName("Host").String()
-			port := field.FieldByName("Port").Int()
-			field.Field(j).Set(reflect.ValueOf(fmt.Sprintf("dm-%s-%d", host, port)))
-		case "DataDir":
-			dataDir := field.Field(j).String()
-			if dataDir != "" { // already have a value, skip filling default values
-				continue
-			}
-			// If the data dir in global options is an obsolute path, it appends to
-			// the global and has a comp-port sub directory
-			if strings.HasPrefix(globalOptions.DataDir, "/") {
-				field.Field(j).Set(reflect.ValueOf(filepath.Join(
-					globalOptions.DataDir,
-					fmt.Sprintf("%s-%s", field.Interface().(InstanceSpec).Role(), getPort(field)),
-				)))
-				continue
-			}
-			// If the data dir in global options is empty or a relative path, keep it be relative
-			// Our run_*.sh start scripts are run inside deploy_path, so the final location
-			// will be deploy_path/global.data_dir
-			// (the default value of global.data_dir is "data")
-			if globalOptions.DataDir == "" {
-				field.Field(j).Set(reflect.ValueOf("data"))
-			} else {
-				field.Field(j).Set(reflect.ValueOf(globalOptions.DataDir))
-			}
-		case "DeployDir":
-			setDefaultDir(globalOptions.DeployDir, field.Interface().(InstanceSpec).Role(), getPort(field), field.Field(j))
-		case "LogDir":
-			if field.Field(j).String() == "" && defaults.CanUpdate(field.Field(j).Interface()) {
-				field.Field(j).Set(reflect.ValueOf(globalOptions.LogDir))
-			}
-		case "Arch":
-			// default values of globalOptions are set before fillCustomDefaults in Unmarshal
-			// so the globalOptions.Arch already has its default value set, no need to check again
-			if field.Field(j).String() == "" {
-				field.Field(j).Set(reflect.ValueOf(globalOptions.Arch))
-			}
-
-			switch strings.ToLower(field.Field(j).String()) {
-			// replace "x86_64" with amd64, they are the same in our repo
-			case "x86_64":
-				field.Field(j).Set(reflect.ValueOf("amd64"))
-			// replace "aarch64" with arm64
-			case "aarch64":
-				field.Field(j).Set(reflect.ValueOf("arm64"))
-			}
-
-			// convert to lower case
-			if field.Field(j).String() != "" {
-				field.Field(j).Set(reflect.ValueOf(strings.ToLower(field.Field(j).String())))
-			}
-		case "OS":
-			// default value of globalOptions.OS is already set, same as "Arch"
-			if field.Field(j).String() == "" {
-				field.Field(j).Set(reflect.ValueOf(globalOptions.OS))
-			}
-			// convert to lower case
-			if field.Field(j).String() != "" {
-				field.Field(j).Set(reflect.ValueOf(strings.ToLower(field.Field(j).String())))
-			}
-		}
-	}
-
-	return nil
 }

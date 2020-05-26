@@ -1008,8 +1008,14 @@ func setCustomDefaults(globalOptions *GlobalOptions, field reflect.Value) error 
 				continue
 			}
 			host := field.FieldByName("Host").String()
-			clientPort := field.FieldByName("ClientPort").Int()
-			field.Field(j).Set(reflect.ValueOf(fmt.Sprintf("pd-%s-%d", host, clientPort)))
+			role := field.Interface().(InstanceSpec).Role()
+			var port int64
+			if role == ComponentPD {
+				port = field.FieldByName("ClientPort").Int()
+			} else {
+				port = field.FieldByName("Port").Int()
+			}
+			field.Field(j).Set(reflect.ValueOf(fmt.Sprintf("%s-%s-%d", role, host, port)))
 		case "DataDir":
 			if field.FieldByName("Imported").Interface().(bool) {
 				setDefaultDir(globalOptions.DataDir, field.Interface().(InstanceSpec).Role(), getPort(field), field.Field(j))
