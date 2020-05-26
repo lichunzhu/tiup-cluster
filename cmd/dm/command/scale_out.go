@@ -88,8 +88,8 @@ func scaleOut(clusterName, topoFile string, opt scaleOutOptions) error {
 	}
 
 	// Abort scale out operation if the merged topology is invalid
-	mergedTopo := metadata.Topology.Merge(&newPart)
-	if err := mergedTopo.Validate(); err != nil {
+	mergedTopo := metadata.Topology.Merge(&newPart).GetDMSpecification()
+	if err := meta.Validate(mergedTopo); err != nil {
 		return err
 	}
 

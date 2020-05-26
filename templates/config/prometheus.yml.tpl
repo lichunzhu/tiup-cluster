@@ -12,10 +12,16 @@ rule_files:
   - 'node.rules.yml'
   - 'blacker.rules.yml'
   - 'bypass.rules.yml'
+{{- if .PDAddrs}}
   - 'pd.rules.yml'
+{{- end}}
+{{- if .TiDBStatusAddrs}}
   - 'tidb.rules.yml'
+{{- end}}
+{{- if .TiKVStatusAddrs}}
   - 'tikv.rules.yml'
   - 'tikv.accelerate.rules.yml'
+{{- end}}
 {{- if .TiFlashStatusAddrs}}
   - 'tiflash.rules.yml'
 {{- end}}

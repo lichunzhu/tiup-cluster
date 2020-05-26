@@ -96,11 +96,15 @@ type Specification interface {
 	ComponentsByStopOrder() (comps []Component)
 	ComponentsByStartOrder() (comps []Component)
 	ComponentsByUpdateOrder() (comps []Component)
+	Merge(specification Specification) Specification
 	IterComponent(fn func(comp Component))
 	IterInstance(fn func(instance Instance))
 	IterHost(fn func(instance Instance))
 	GetGlobalOptions() GlobalOptions
 	GetMonitoredOptions() MonitoredOptions
+	GetMonitors() []PrometheusSpec
+	GetGrafana() []GrafanaSpec
+	GetAlertManager() []AlertManagerSpec
 	GetClusterSpecification() *ClusterSpecification
 	GetDMSpecification() *DMSpecification
 }
@@ -134,7 +138,7 @@ type instance struct {
 	host string
 	port int
 	sshp int
-	topo *ClusterSpecification
+	topo Specification
 
 	usedPorts []int
 	usedDirs  []string
@@ -157,7 +161,7 @@ func (i *instance) InitConfig(e executor.TiOpsExecutor, _, _, user string, paths
 	port := i.GetPort()
 	sysCfg := filepath.Join(paths.Cache, fmt.Sprintf("%s-%s-%d.service", comp, host, port))
 
-	resource := MergeResourceControl(i.topo.GlobalOptions.ResourceControl, i.resourceControl())
+	resource := MergeResourceControl(i.topo.GetGlobalOptions().ResourceControl, i.resourceControl())
 	systemCfg := system.NewConfig(comp, user, paths.Deploy).
 		WithMemoryLimit(resource.MemoryLimit).
 		WithCPUQuota(resource.CPUQuota).
@@ -388,12 +392,13 @@ func (i *TiDBInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		return err
 	}
 
+	topo := i.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(TiDBSpec)
 	cfg := scripts.NewTiDBScript(
 		i.GetHost(),
 		paths.Deploy,
 		paths.Log,
-	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithStatusPort(spec.StatusPort).AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithStatusPort(spec.StatusPort).AppendEndpoints(topo.Endpoints(deployUser)...)
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_tidb_%s_%d.sh", i.GetHost(), i.GetPort()))
 	if err := cfg.ConfigToFile(fp); err != nil {
 		return err
@@ -431,7 +436,7 @@ func (i *TiDBInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		specConfig = mergedConfig
 	}
 
-	if err := i.mergeServerConfig(e, i.instance.topo.ServerConfigs.TiDB, specConfig, paths); err != nil {
+	if err := i.mergeServerConfig(e, topo.ServerConfigs.TiDB, specConfig, paths); err != nil {
 		return err
 	}
 
@@ -442,7 +447,7 @@ func (i *TiDBInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 func (i *TiDBInstance) ScaleConfig(e executor.TiOpsExecutor, b Specification, clusterName, clusterVersion, deployUser string, paths DirPaths) error {
 	s := i.instance.topo
 	defer func() { i.instance.topo = s }()
-	i.instance.topo = b.GetClusterSpecification()
+	i.instance.topo = b
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
@@ -494,13 +499,14 @@ func (i *TiKVInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		return err
 	}
 
+	topo := i.instance.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(TiKVSpec)
 	cfg := scripts.NewTiKVScript(
 		i.GetHost(),
 		paths.Deploy,
 		paths.Data[0],
 		paths.Log,
-	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithStatusPort(spec.StatusPort).AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).WithStatusPort(spec.StatusPort).AppendEndpoints(topo.Endpoints(deployUser)...)
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_tikv_%s_%d.sh", i.GetHost(), i.GetPort()))
 	if err := cfg.ConfigToFile(fp); err != nil {
 		return err
@@ -539,7 +545,7 @@ func (i *TiKVInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		specConfig = mergedConfig
 	}
 
-	if err := i.mergeServerConfig(e, i.instance.topo.ServerConfigs.TiKV, specConfig, paths); err != nil {
+	if err := i.mergeServerConfig(e, topo.ServerConfigs.TiKV, specConfig, paths); err != nil {
 		return err
 	}
 
@@ -552,7 +558,7 @@ func (i *TiKVInstance) ScaleConfig(e executor.TiOpsExecutor, b Specification, cl
 	defer func() {
 		i.instance.topo = s
 	}()
-	i.instance.topo = b.GetClusterSpecification()
+	i.instance.topo = b
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
@@ -606,6 +612,7 @@ func (i *PDInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clusterVe
 		return err
 	}
 
+	topo := i.instance.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(PDSpec)
 	cfg := scripts.NewPDScript(
 		spec.Name,
@@ -613,7 +620,7 @@ func (i *PDInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clusterVe
 		paths.Deploy,
 		paths.Data[0],
 		paths.Log,
-	).WithClientPort(spec.ClientPort).WithPeerPort(spec.PeerPort).AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+	).WithClientPort(spec.ClientPort).WithPeerPort(spec.PeerPort).AppendEndpoints(topo.Endpoints(deployUser)...)
 
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_pd_%s_%d.sh", i.GetHost(), i.GetPort()))
 	if err := cfg.ConfigToFile(fp); err != nil {
@@ -628,11 +635,11 @@ func (i *PDInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clusterVe
 	}
 
 	// Set the PD metrics storage address
-	if semver.Compare(clusterVersion, "v3.1.0") >= 0 && len(i.instance.topo.Monitors) > 0 {
+	if semver.Compare(clusterVersion, "v3.1.0") >= 0 && len(topo.Monitors) > 0 {
 		if spec.Config == nil {
 			spec.Config = map[string]interface{}{}
 		}
-		prom := i.instance.topo.Monitors[0]
+		prom := topo.Monitors[0]
 		spec.Config["pd-server.metric-storage"] = fmt.Sprintf("http://%s:%d", prom.Host, prom.Port)
 	}
 
@@ -660,7 +667,7 @@ func (i *PDInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clusterVe
 		specConfig = mergedConfig
 	}
 
-	if err := i.mergeServerConfig(e, i.instance.topo.ServerConfigs.PD, specConfig, paths); err != nil {
+	if err := i.mergeServerConfig(e, topo.ServerConfigs.PD, specConfig, paths); err != nil {
 		return err
 	}
 
@@ -753,7 +760,7 @@ func (i *TiFlashInstance) checkIncorrectKey(key string) error {
 	if dir, ok := i.InstanceSpec.(TiFlashSpec).Config[key].(string); ok && dir != "" {
 		return fmt.Errorf(errMsg, key, "host")
 	}
-	if dir, ok := i.instance.topo.ServerConfigs.TiFlash[key].(string); ok && dir != "" {
+	if dir, ok := i.instance.topo.GetClusterSpecification().ServerConfigs.TiFlash[key].(string); ok && dir != "" {
 		return fmt.Errorf(errMsg, key, "server_configs")
 	}
 	return nil
@@ -896,10 +903,11 @@ func (i *TiFlashInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		return err
 	}
 
+	topo := i.instance.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(TiFlashSpec)
 
 	tidbStatusAddrs := []string{}
-	for _, tidb := range i.instance.topo.TiDBServers {
+	for _, tidb := range topo.TiDBServers {
 		tidbStatusAddrs = append(tidbStatusAddrs, fmt.Sprintf("%s:%d", tidb.Host, uint64(tidb.StatusPort)))
 	}
 	tidbStatusStr := strings.Join(tidbStatusAddrs, ",")
@@ -921,7 +929,7 @@ func (i *TiFlashInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		WithStatusPort(spec.StatusPort).
 		WithTmpDir(spec.TmpDir).
 		WithNumaNode(spec.NumaNode).
-		AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+		AppendEndpoints(topo.Endpoints(deployUser)...)
 
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_tiflash_%s_%d.sh", i.GetHost(), i.GetPort()))
 	if err := cfg.ConfigToFile(fp); err != nil {
@@ -937,7 +945,7 @@ func (i *TiFlashInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		return err
 	}
 
-	conf, err := i.InitTiFlashLearnerConfig(cfg, i.instance.topo.ServerConfigs.TiFlashLearner)
+	conf, err := i.InitTiFlashLearnerConfig(cfg, topo.ServerConfigs.TiFlashLearner)
 	if err != nil {
 		return err
 	}
@@ -971,7 +979,7 @@ func (i *TiFlashInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		return err
 	}
 
-	conf, err = i.InitTiFlashConfig(cfg, i.instance.topo.ServerConfigs.TiFlash)
+	conf, err = i.InitTiFlashConfig(cfg, topo.ServerConfigs.TiFlash)
 	if err != nil {
 		return err
 	}
@@ -1008,7 +1016,7 @@ func (i *TiFlashInstance) ScaleConfig(e executor.TiOpsExecutor, b Specification,
 	defer func() {
 		i.instance.topo = s
 	}()
-	i.instance.topo = b.GetClusterSpecification()
+	i.instance.topo = b
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
@@ -1018,7 +1026,7 @@ type replicateConfig struct {
 
 func (i *TiFlashInstance) getEndpoints() []string {
 	var endpoints []string
-	for _, pd := range i.instance.topo.PDServers {
+	for _, pd := range i.instance.topo.GetClusterSpecification().PDServers {
 		endpoints = append(endpoints, fmt.Sprintf("%s:%d", pd.Host, uint64(pd.ClientPort)))
 	}
 	return endpoints
@@ -1042,7 +1050,7 @@ func (i *TiFlashInstance) PrepareStart() error {
 }
 
 // MonitorComponent represents Monitor component.
-type MonitorComponent struct{ *ClusterSpecification }
+type MonitorComponent struct{ Specification }
 
 // Name implements Component interface.
 func (c *MonitorComponent) Name() string {
@@ -1051,15 +1059,15 @@ func (c *MonitorComponent) Name() string {
 
 // Instances implements Component interface.
 func (c *MonitorComponent) Instances() []Instance {
-	ins := make([]Instance, 0, len(c.Monitors))
-	for _, s := range c.Monitors {
+	ins := make([]Instance, 0, len(c.GetMonitors()))
+	for _, s := range c.GetMonitors() {
 		ins = append(ins, &MonitorInstance{instance{
 			InstanceSpec: s,
 			name:         c.Name(),
 			host:         s.Host,
 			port:         s.Port,
 			sshp:         s.SSHPort,
-			topo:         c.ClusterSpecification,
+			topo:         c.Specification,
 
 			usedPorts: []int{
 				s.Port,
@@ -1113,49 +1121,51 @@ func (i *MonitorInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 	// transfer config
 	fp = filepath.Join(paths.Cache, fmt.Sprintf("tikv_%s.yml", i.GetHost()))
 	cfig := config.NewPrometheusConfig(clusterName)
-	cfig.AddBlackbox(i.GetHost(), uint64(i.instance.topo.MonitoredOptions.BlackboxExporterPort))
+	cfig.AddBlackbox(i.GetHost(), uint64(i.instance.topo.GetMonitoredOptions().BlackboxExporterPort))
 	uniqueHosts := set.NewStringSet()
-	for _, pd := range i.instance.topo.PDServers {
-		uniqueHosts.Insert(pd.Host)
-		cfig.AddPD(pd.Host, uint64(pd.ClientPort))
-	}
-	for _, kv := range i.instance.topo.TiKVServers {
-		uniqueHosts.Insert(kv.Host)
-		cfig.AddTiKV(kv.Host, uint64(kv.StatusPort))
-	}
-	for _, db := range i.instance.topo.TiDBServers {
-		uniqueHosts.Insert(db.Host)
-		cfig.AddTiDB(db.Host, uint64(db.StatusPort))
-	}
-	for _, flash := range i.instance.topo.TiFlashServers {
-		uniqueHosts.Insert(flash.Host)
-		cfig.AddTiFlashLearner(flash.Host, uint64(flash.FlashProxyStatusPort))
-		cfig.AddTiFlash(flash.Host, uint64(flash.StatusPort))
-	}
-	for _, pump := range i.instance.topo.PumpServers {
-		uniqueHosts.Insert(pump.Host)
-		cfig.AddPump(pump.Host, uint64(pump.Port))
-	}
-	for _, drainer := range i.instance.topo.Drainers {
-		uniqueHosts.Insert(drainer.Host)
-		cfig.AddDrainer(drainer.Host, uint64(drainer.Port))
-	}
-	for _, cdc := range i.instance.topo.CDCServers {
-		uniqueHosts.Insert(cdc.Host)
-		cfig.AddCDC(cdc.Host, uint64(cdc.Port))
-	}
-	for _, grafana := range i.instance.topo.Grafana {
-		uniqueHosts.Insert(grafana.Host)
-		cfig.AddGrafana(grafana.Host, uint64(grafana.Port))
-	}
-	for _, alertmanager := range i.instance.topo.Alertmanager {
-		uniqueHosts.Insert(alertmanager.Host)
-		cfig.AddAlertmanager(alertmanager.Host, uint64(alertmanager.WebPort))
-	}
-	for host := range uniqueHosts {
-		cfig.AddNodeExpoertor(host, uint64(i.instance.topo.MonitoredOptions.NodeExporterPort))
-		cfig.AddBlackboxExporter(host, uint64(i.instance.topo.MonitoredOptions.BlackboxExporterPort))
-		cfig.AddMonitoredServer(host)
+	if topo := i.topo.GetClusterSpecification(); topo != nil {
+		for _, pd := range topo.PDServers {
+			uniqueHosts.Insert(pd.Host)
+			cfig.AddPD(pd.Host, uint64(pd.ClientPort))
+		}
+		for _, kv := range topo.TiKVServers {
+			uniqueHosts.Insert(kv.Host)
+			cfig.AddTiKV(kv.Host, uint64(kv.StatusPort))
+		}
+		for _, db := range topo.TiDBServers {
+			uniqueHosts.Insert(db.Host)
+			cfig.AddTiDB(db.Host, uint64(db.StatusPort))
+		}
+		for _, flash := range topo.TiFlashServers {
+			uniqueHosts.Insert(flash.Host)
+			cfig.AddTiFlashLearner(flash.Host, uint64(flash.FlashProxyStatusPort))
+			cfig.AddTiFlash(flash.Host, uint64(flash.StatusPort))
+		}
+		for _, pump := range topo.PumpServers {
+			uniqueHosts.Insert(pump.Host)
+			cfig.AddPump(pump.Host, uint64(pump.Port))
+		}
+		for _, drainer := range topo.Drainers {
+			uniqueHosts.Insert(drainer.Host)
+			cfig.AddDrainer(drainer.Host, uint64(drainer.Port))
+		}
+		for _, cdc := range topo.CDCServers {
+			uniqueHosts.Insert(cdc.Host)
+			cfig.AddCDC(cdc.Host, uint64(cdc.Port))
+		}
+		for _, grafana := range topo.Grafana {
+			uniqueHosts.Insert(grafana.Host)
+			cfig.AddGrafana(grafana.Host, uint64(grafana.Port))
+		}
+		for _, alertmanager := range topo.Alertmanager {
+			uniqueHosts.Insert(alertmanager.Host)
+			cfig.AddAlertmanager(alertmanager.Host, uint64(alertmanager.WebPort))
+		}
+		for host := range uniqueHosts {
+			cfig.AddNodeExpoertor(host, uint64(topo.MonitoredOptions.NodeExporterPort))
+			cfig.AddBlackboxExporter(host, uint64(topo.MonitoredOptions.BlackboxExporterPort))
+			cfig.AddMonitoredServer(host)
+		}
 	}
 
 	if err := cfig.ConfigToFile(fp); err != nil {
@@ -1174,12 +1184,12 @@ func (i *MonitorInstance) ScaleConfig(e executor.TiOpsExecutor, b Specification,
 	clusterName string, clusterVersion string, deployUser string, paths DirPaths) error {
 	s := i.instance.topo
 	defer func() { i.instance.topo = s }()
-	i.instance.topo = b.GetClusterSpecification()
+	i.instance.topo = b
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
 // GrafanaComponent represents Grafana component.
-type GrafanaComponent struct{ *ClusterSpecification }
+type GrafanaComponent struct{ Specification }
 
 // Name implements Component interface.
 func (c *GrafanaComponent) Name() string {
@@ -1188,8 +1198,8 @@ func (c *GrafanaComponent) Name() string {
 
 // Instances implements Component interface.
 func (c *GrafanaComponent) Instances() []Instance {
-	ins := make([]Instance, 0, len(c.Grafana))
-	for _, s := range c.Grafana {
+	ins := make([]Instance, 0, len(c.GetGrafana()))
+	for _, s := range c.GetGrafana() {
 		ins = append(ins, &GrafanaInstance{
 			instance: instance{
 				InstanceSpec: s,
@@ -1197,7 +1207,7 @@ func (c *GrafanaComponent) Instances() []Instance {
 				host:         s.Host,
 				port:         s.Port,
 				sshp:         s.SSHPort,
-				topo:         c.ClusterSpecification,
+				topo:         c.Specification,
 
 				usedPorts: []int{
 					s.Port,
@@ -1262,12 +1272,12 @@ func (i *GrafanaInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 	}
 
 	// transfer datasource.yml
-	if len(i.instance.topo.Monitors) == 0 {
+	if len(i.instance.topo.GetMonitors()) == 0 {
 		return errors.New("no prometheus found in topology")
 	}
 	fp = filepath.Join(paths.Cache, fmt.Sprintf("datasource_%s.yml", i.GetHost()))
-	if err := config.NewDatasourceConfig(clusterName, i.instance.topo.Monitors[0].Host).
-		WithPort(uint64(i.instance.topo.Monitors[0].Port)).
+	if err := config.NewDatasourceConfig(clusterName, i.instance.topo.GetMonitors()[0].Host).
+		WithPort(uint64(i.instance.topo.GetMonitors()[0].Port)).
 		ConfigToFile(fp); err != nil {
 		return err
 	}
@@ -1284,12 +1294,12 @@ func (i *GrafanaInstance) ScaleConfig(e executor.TiOpsExecutor, b Specification,
 	clusterName string, clusterVersion string, deployUser string, paths DirPaths) error {
 	s := i.instance.topo
 	defer func() { i.instance.topo = s }()
-	i.instance.topo = b.GetClusterSpecification().Merge(i.instance.topo)
+	i.instance.topo = b.Merge(i.instance.topo)
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
 // AlertManagerComponent represents Alertmanager component.
-type AlertManagerComponent struct{ *ClusterSpecification }
+type AlertManagerComponent struct{ Specification }
 
 // Name implements Component interface.
 func (c *AlertManagerComponent) Name() string {
@@ -1298,8 +1308,8 @@ func (c *AlertManagerComponent) Name() string {
 
 // Instances implements Component interface.
 func (c *AlertManagerComponent) Instances() []Instance {
-	ins := make([]Instance, 0, len(c.Alertmanager))
-	for _, s := range c.Alertmanager {
+	ins := make([]Instance, 0, len(c.GetAlertManager()))
+	for _, s := range c.GetAlertManager() {
 		ins = append(ins, &AlertManagerInstance{
 			instance: instance{
 				InstanceSpec: s,
@@ -1307,7 +1317,7 @@ func (c *AlertManagerComponent) Instances() []Instance {
 				host:         s.Host,
 				port:         s.WebPort,
 				sshp:         s.SSHPort,
-				topo:         c.ClusterSpecification,
+				topo:         c.Specification,
 
 				usedPorts: []int{
 					s.WebPort,
@@ -1340,7 +1350,7 @@ func (i *AlertManagerInstance) InitConfig(e executor.TiOpsExecutor, clusterName,
 	// Transfer start script
 	spec := i.InstanceSpec.(AlertManagerSpec)
 	cfg := scripts.NewAlertManagerScript(spec.Host, paths.Deploy, paths.Data[0], paths.Log).
-		WithWebPort(spec.WebPort).WithClusterPort(spec.ClusterPort).WithNumaNode(spec.NumaNode).AppendEndpoints(i.instance.topo.AlertManagerEndpoints(deployUser))
+		WithWebPort(spec.WebPort).WithClusterPort(spec.ClusterPort).WithNumaNode(spec.NumaNode).AppendEndpoints(GetAlertManagerEndpoints(i.topo, deployUser))
 
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_alertmanager_%s_%d.sh", i.GetHost(), i.GetPort()))
 	if err := cfg.ConfigToFile(fp); err != nil {
@@ -1372,7 +1382,7 @@ func (i *AlertManagerInstance) ScaleConfig(e executor.TiOpsExecutor, b Specifica
 	clusterName string, clusterVersion string, deployUser string, paths DirPaths) error {
 	s := i.instance.topo
 	defer func() { i.instance.topo = s }()
-	i.instance.topo = b.GetClusterSpecification()
+	i.instance.topo = b
 	return i.InitConfig(e, clusterName, clusterVersion, deployUser, paths)
 }
 
@@ -1384,6 +1394,18 @@ func (topo *ClusterSpecification) GetGlobalOptions() GlobalOptions {
 // GetMonitoredOptions returns MonitoredOptions
 func (topo *ClusterSpecification) GetMonitoredOptions() MonitoredOptions {
 	return topo.MonitoredOptions
+}
+
+func (topo *ClusterSpecification) GetMonitors() []PrometheusSpec {
+	return topo.Monitors
+}
+
+func (topo *ClusterSpecification) GetGrafana() []GrafanaSpec {
+	return topo.Grafana
+}
+
+func (topo *ClusterSpecification) GetAlertManager() []AlertManagerSpec {
+	return topo.Alertmanager
 }
 
 // GetClusterSpecification returns cluster topology
@@ -1497,10 +1519,10 @@ func (topo *ClusterSpecification) Endpoints(user string) []*scripts.PDScript {
 	return ends
 }
 
-// AlertManagerEndpoints returns the AlertManager endpoints configurations
-func (topo *ClusterSpecification) AlertManagerEndpoints(user string) []*scripts.AlertManagerScript {
+// GetAlertManagerEndpoints returns the AlertManager endpoints configurations
+func GetAlertManagerEndpoints(topo Specification, user string) []*scripts.AlertManagerScript {
 	var ends []*scripts.AlertManagerScript
-	for _, spec := range topo.Alertmanager {
+	for _, spec := range topo.GetAlertManager() {
 		deployDir := clusterutil.Abs(user, spec.DeployDir)
 		// data dir would be empty for components which don't need it
 		dataDir := spec.DataDir

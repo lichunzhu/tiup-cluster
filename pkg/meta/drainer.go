@@ -82,6 +82,7 @@ func (i *DrainerInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		return err
 	}
 
+	topo := i.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(DrainerSpec)
 	cfg := scripts.NewDrainerScript(
 		i.GetHost()+":"+strconv.Itoa(i.GetPort()),
@@ -89,7 +90,7 @@ func (i *DrainerInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		paths.Deploy,
 		paths.Data[0],
 		paths.Log,
-	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).AppendEndpoints(topo.Endpoints(deployUser)...)
 
 	cfg.WithCommitTs(spec.CommitTS)
 
@@ -131,7 +132,7 @@ func (i *DrainerInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 		specConfig = mergedConfig
 	}
 
-	if err := i.mergeServerConfig(e, i.topo.ServerConfigs.Drainer, specConfig, paths); err != nil {
+	if err := i.mergeServerConfig(e, topo.ServerConfigs.Drainer, specConfig, paths); err != nil {
 		return err
 	}
 

@@ -625,7 +625,7 @@ func (topo *TopologySpecification) UnmarshalYAML(unmarshal func(interface{}) err
 		return err
 	}
 
-	return topo.Validate()
+	return Validate(topo)
 }
 
 func findField(v reflect.Value, fieldName string) (int, bool) {
@@ -639,7 +639,7 @@ func findField(v reflect.Value, fieldName string) (int, bool) {
 
 // platformConflictsDetect checks for conflicts in topology for different OS / Arch
 // for set to the same host / IP
-func (topo *TopologySpecification) platformConflictsDetect() error {
+func platformConflictsDetect(topo Specification) error {
 	type (
 		conflict struct {
 			os   string
@@ -695,7 +695,7 @@ func (topo *TopologySpecification) platformConflictsDetect() error {
 	return nil
 }
 
-func (topo *TopologySpecification) portConflictsDetect() error {
+func portConflictsDetect(topo Specification) error {
 	type (
 		usedPort struct {
 			host string
@@ -800,7 +800,7 @@ func (topo *TopologySpecification) portConflictsDetect() error {
 	return nil
 }
 
-func (topo *TopologySpecification) dirConflictsDetect() error {
+func dirConflictsDetect(topo Specification) error {
 	type (
 		usedDir struct {
 			host string
@@ -879,16 +879,16 @@ func (topo *TopologySpecification) dirConflictsDetect() error {
 
 // Validate validates the topology specification and produce error if the
 // specification invalid (e.g: port conflicts or directory conflicts)
-func (topo *TopologySpecification) Validate() error {
-	if err := topo.platformConflictsDetect(); err != nil {
+func Validate(topo Specification) error {
+	if err := platformConflictsDetect(topo); err != nil {
 		return err
 	}
 
-	if err := topo.portConflictsDetect(); err != nil {
+	if err := portConflictsDetect(topo); err != nil {
 		return err
 	}
 
-	return topo.dirConflictsDetect()
+	return dirConflictsDetect(topo)
 }
 
 // GetPDList returns a list of PD API hosts of the current cluster
@@ -910,7 +910,8 @@ func (topo *TopologySpecification) GetEtcdClient() (*clientv3.Client, error) {
 }
 
 // Merge returns a new TopologySpecification which sum old ones
-func (topo *TopologySpecification) Merge(that *TopologySpecification) *TopologySpecification {
+func (topo *TopologySpecification) Merge(topoThat Specification) Specification {
+	that := topoThat.GetClusterSpecification()
 	return &TopologySpecification{
 		GlobalOptions:    topo.GlobalOptions,
 		MonitoredOptions: topo.MonitoredOptions,

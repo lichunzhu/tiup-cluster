@@ -41,6 +41,7 @@ type PrometheusConfig struct {
 	LightningAddrs            []string
 	MonitoredServers          []string
 	AlertmanagerAddrs         []string
+	DMWorkerAddrs             []string
 	PushgatewayAddr           string
 	BlackboxAddr              string
 	KafkaExporterAddr         string
@@ -164,6 +165,12 @@ func (c *PrometheusConfig) AddKafkaExporter(ip string, port uint64) *PrometheusC
 
 // AddGrafana add an kafka exporter address
 func (c *PrometheusConfig) AddGrafana(ip string, port uint64) *PrometheusConfig {
+	c.GrafanaAddr = fmt.Sprintf("%s:%d", ip, port)
+	return c
+}
+
+// AddDMWorker add an dm worker address
+func (c *PrometheusConfig) AddDMWorker(ip string, port uint64) *PrometheusConfig {
 	c.GrafanaAddr = fmt.Sprintf("%s:%d", ip, port)
 	return c
 }

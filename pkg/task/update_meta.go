@@ -83,19 +83,19 @@ func (u *UpdateMeta) Execute(ctx *Context) error {
 		}
 		newMeta.Topology.CDCServers = append(newMeta.Topology.CDCServers, topo.CDCServers[i])
 	}
-	for i, instance := range (&meta.MonitorComponent{ClusterSpecification: topo}).Instances() {
+	for i, instance := range (&meta.MonitorComponent{Specification: topo}).Instances() {
 		if deleted.Exist(instance.ID()) {
 			continue
 		}
 		newMeta.Topology.Monitors = append(newMeta.Topology.Monitors, topo.Monitors[i])
 	}
-	for i, instance := range (&meta.GrafanaComponent{ClusterSpecification: topo}).Instances() {
+	for i, instance := range (&meta.GrafanaComponent{Specification: topo}).Instances() {
 		if deleted.Exist(instance.ID()) {
 			continue
 		}
 		newMeta.Topology.Grafana = append(newMeta.Topology.Grafana, topo.Grafana[i])
 	}
-	for i, instance := range (&meta.AlertManagerComponent{ClusterSpecification: topo}).Instances() {
+	for i, instance := range (&meta.AlertManagerComponent{Specification: topo}).Instances() {
 		if deleted.Exist(instance.ID()) {
 			continue
 		}

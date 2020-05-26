@@ -68,7 +68,7 @@ func (i *CDCInstance) ScaleConfig(e executor.TiOpsExecutor, b Specification, clu
 	defer func() {
 		i.instance.topo = s
 	}()
-	i.instance.topo = b.GetClusterSpecification()
+	i.instance.topo = b
 
 	return i.InitConfig(e, clusterName, clusterVersion, user, paths)
 }
@@ -79,12 +79,13 @@ func (i *CDCInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clusterV
 		return err
 	}
 
+	topo := i.instance.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(CDCSpec)
 	cfg := scripts.NewCDCScript(
 		i.GetHost(),
 		paths.Deploy,
 		paths.Log,
-	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).AppendEndpoints(topo.Endpoints(deployUser)...)
 
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_cdc_%s_%d.sh", i.GetHost(), i.GetPort()))
 
@@ -102,5 +103,5 @@ func (i *CDCInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clusterV
 
 	specConfig := spec.Config
 
-	return i.mergeServerConfig(e, i.topo.ServerConfigs.CDC, specConfig, paths)
+	return i.mergeServerConfig(e, topo.ServerConfigs.CDC, specConfig, paths)
 }

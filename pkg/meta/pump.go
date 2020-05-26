@@ -82,6 +82,7 @@ func (i *PumpInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		return err
 	}
 
+	topo := i.instance.topo.GetClusterSpecification()
 	spec := i.InstanceSpec.(PumpSpec)
 	cfg := scripts.NewPumpScript(
 		i.GetHost()+":"+strconv.Itoa(i.GetPort()),
@@ -89,7 +90,7 @@ func (i *PumpInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		paths.Deploy,
 		paths.Data[0],
 		paths.Log,
-	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).AppendEndpoints(i.instance.topo.Endpoints(deployUser)...)
+	).WithPort(spec.Port).WithNumaNode(spec.NumaNode).AppendEndpoints(topo.Endpoints(deployUser)...)
 
 	fp := filepath.Join(paths.Cache, fmt.Sprintf("run_pump_%s_%d.sh", i.GetHost(), i.GetPort()))
 	if err := cfg.ConfigToFile(fp); err != nil {
@@ -128,5 +129,5 @@ func (i *PumpInstance) InitConfig(e executor.TiOpsExecutor, clusterName, cluster
 		specConfig = mergedConfig
 	}
 
-	return i.mergeServerConfig(e, i.topo.ServerConfigs.Pump, specConfig, paths)
+	return i.mergeServerConfig(e, topo.ServerConfigs.Pump, specConfig, paths)
 }

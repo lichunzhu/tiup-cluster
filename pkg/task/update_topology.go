@@ -38,9 +38,9 @@ func (u *UpdateTopology) Execute(ctx *Context) error {
 	var ops []clientv3.Op
 	var instances []meta.Instance
 
-	ops, instances = updateInstancesAndOps(ops, instances, deleted, (&meta.MonitorComponent{ClusterSpecification: topo}).Instances(), "prometheus")
-	ops, instances = updateInstancesAndOps(ops, instances, deleted, (&meta.GrafanaComponent{ClusterSpecification: topo}).Instances(), "grafana")
-	ops, instances = updateInstancesAndOps(ops, instances, deleted, (&meta.AlertManagerComponent{ClusterSpecification: topo}).Instances(), "alertmanager")
+	ops, instances = updateInstancesAndOps(ops, instances, deleted, (&meta.MonitorComponent{Specification: topo}).Instances(), "prometheus")
+	ops, instances = updateInstancesAndOps(ops, instances, deleted, (&meta.GrafanaComponent{Specification: topo}).Instances(), "grafana")
+	ops, instances = updateInstancesAndOps(ops, instances, deleted, (&meta.AlertManagerComponent{Specification: topo}).Instances(), "alertmanager")
 
 	for _, instance := range (&meta.TiDBComponent{ClusterSpecification: topo}).Instances() {
 		if deleted.Exist(instance.ID()) {
