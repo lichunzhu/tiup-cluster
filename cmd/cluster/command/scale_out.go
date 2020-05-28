@@ -174,7 +174,7 @@ func buildScaleOutTask(
 		initializedHosts.Insert(instance.GetHost())
 	})
 	// uninitializedHosts are hosts which haven't been initialized yet
-	uninitializedHosts := make(map[string]hostInfo) // host -> ssh-port, os, arch
+	uninitializedHosts := make(map[string]HostInfo) // host -> ssh-port, os, arch
 	var iterErr error                               // error when itering over instances
 	iterErr = nil
 	newPart.IterInstance(func(instance meta.Instance) {
@@ -192,10 +192,10 @@ func buildScaleOutTask(
 				return // skip the host to avoid issues
 			}
 
-			uninitializedHosts[host] = hostInfo{
-				ssh:  instance.GetSSHPort(),
-				os:   instance.OS(),
-				arch: instance.Arch(),
+			uninitializedHosts[host] = HostInfo{
+				SSH:  instance.GetSSHPort(),
+				OS:   instance.OS(),
+				Arch: instance.Arch(),
 			}
 
 			var dirs []string
@@ -321,12 +321,13 @@ func buildScaleOutTask(
 	}).BuildAsStep("Check status").SetHidden(true)
 
 	// Deploy monitor relevant components to remote
-	dlTasks, dpTasks := buildMonitoredDeployTask(
+	dlTasks, dpTasks := prepare.BuildMonitoredDeployTask(
 		clusterName,
 		uninitializedHosts,
 		metadata.Topology.GlobalOptions,
 		metadata.Topology.MonitoredOptions,
 		metadata.Version,
+		gOpt,
 	)
 	downloadCompTasks = append(downloadCompTasks, convertStepDisplaysToTasks(dlTasks)...)
 	deployCompTasks = append(deployCompTasks, convertStepDisplaysToTasks(dpTasks)...)

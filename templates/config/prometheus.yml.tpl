@@ -37,6 +37,9 @@ rule_files:
 {{- if .LightningAddrs}}
   - 'lightning.rules.yml'
 {{- end}}
+{{- if .DMWorkerAddrs}}
+  - 'dm_worker.rules.yml'
+{{- end}}
 
 {{- if .AlertmanagerAddrs}}
 alerting:
@@ -84,6 +87,7 @@ scrape_configs:
 {{- range .NodeExporterAddrs}}
       - '{{.}}'
 {{- end}}
+{{- if .TiDBStatusAddrs}}
   - job_name: "tidb"
     honor_labels: true # don't overwrite job & instance labels
     static_configs:
@@ -91,6 +95,8 @@ scrape_configs:
 {{- range .TiDBStatusAddrs}}
       - '{{.}}'
 {{- end}}
+{{- end}}
+{{- if .TiKVStatusAddrs}}
   - job_name: "tikv"
     honor_labels: true # don't overwrite job & instance labels
     static_configs:
@@ -98,12 +104,15 @@ scrape_configs:
 {{- range .TiKVStatusAddrs}}
       - '{{.}}'
 {{- end}}
+{{- end}}
+{{- if .PDAddrs}}
   - job_name: "pd"
     honor_labels: true # don't overwrite job & instance labels
     static_configs:
     - targets:
 {{- range .PDAddrs}}
       - '{{.}}'
+{{- end}}
 {{- end}}
 {{- if .TiFlashStatusAddrs}}
   - job_name: "tiflash"
@@ -193,6 +202,15 @@ scrape_configs:
     static_configs:
     - targets:
 {{- range .CDCAddrs}}
+      - '{{.}}'
+{{- end}}
+{{- end}}
+{{- if .DMWorkerAddrs}}
+  - job_name: "dm_worker"
+    honor_labels: true # don't overwrite job & instance labels
+    static_configs:
+    - targets:
+{{- range .DMWorkerAddrs}}
       - '{{.}}'
 {{- end}}
 {{- end}}

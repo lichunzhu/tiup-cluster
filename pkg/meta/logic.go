@@ -1153,19 +1153,25 @@ func (i *MonitorInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clus
 			uniqueHosts.Insert(cdc.Host)
 			cfig.AddCDC(cdc.Host, uint64(cdc.Port))
 		}
-		for _, grafana := range topo.Grafana {
-			uniqueHosts.Insert(grafana.Host)
-			cfig.AddGrafana(grafana.Host, uint64(grafana.Port))
+	} else if topo := i.topo.GetDMSpecification(); topo != nil {
+		for _, worker := range topo.Workers {
+			uniqueHosts.Insert(worker.Host)
+			cfig.AddDMWorker(worker.Host, uint64(worker.Port))
 		}
-		for _, alertmanager := range topo.Alertmanager {
-			uniqueHosts.Insert(alertmanager.Host)
-			cfig.AddAlertmanager(alertmanager.Host, uint64(alertmanager.WebPort))
-		}
-		for host := range uniqueHosts {
-			cfig.AddNodeExpoertor(host, uint64(topo.MonitoredOptions.NodeExporterPort))
-			cfig.AddBlackboxExporter(host, uint64(topo.MonitoredOptions.BlackboxExporterPort))
-			cfig.AddMonitoredServer(host)
-		}
+	}
+
+	for _, grafana := range i.topo.GetGrafana() {
+		uniqueHosts.Insert(grafana.Host)
+		cfig.AddGrafana(grafana.Host, uint64(grafana.Port))
+	}
+	for _, alertmanager := range i.topo.GetAlertManager() {
+		uniqueHosts.Insert(alertmanager.Host)
+		cfig.AddAlertmanager(alertmanager.Host, uint64(alertmanager.WebPort))
+	}
+	for host := range uniqueHosts {
+		cfig.AddNodeExpoertor(host, uint64(i.topo.GetMonitoredOptions().NodeExporterPort))
+		cfig.AddBlackboxExporter(host, uint64(i.topo.GetMonitoredOptions().BlackboxExporterPort))
+		cfig.AddMonitoredServer(host)
 	}
 
 	if err := cfig.ConfigToFile(fp); err != nil {

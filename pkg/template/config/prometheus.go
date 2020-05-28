@@ -171,7 +171,7 @@ func (c *PrometheusConfig) AddGrafana(ip string, port uint64) *PrometheusConfig 
 
 // AddDMWorker add an dm worker address
 func (c *PrometheusConfig) AddDMWorker(ip string, port uint64) *PrometheusConfig {
-	c.GrafanaAddr = fmt.Sprintf("%s:%d", ip, port)
+	c.DMWorkerAddrs = append(c.DMWorkerAddrs, fmt.Sprintf("%s:%d", ip, port))
 	return c
 }
 

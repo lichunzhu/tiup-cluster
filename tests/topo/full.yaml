@@ -8,8 +8,9 @@ server_configs:
         storage.stop-write-at-available-space: 1 mib
 
 tidb_servers:
-  - host: 172.19.0.101
-  - host: 172.19.0.102
+  - host: 172.16.5.201
+    -
+  - host: 172.16.5.113
 
 pd_servers:
   - host: 172.19.0.103

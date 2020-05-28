@@ -67,12 +67,7 @@ type (
 		usePassword  bool   // use password instead of identity file for ssh connection
 	}
 
-	hostInfo struct {
-		ssh  int    // ssh port of host
-		os   string // operating system
-		arch string // cpu architecture
-		// vendor string
-	}
+	HostInfo = prepare.HostInfo
 )
 
 func newDeploy() *cobra.Command {
@@ -194,14 +189,14 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 	)
 
 	// Initialize environment
-	uniqueHosts := make(map[string]hostInfo) // host -> ssh-port, os, arch
+	uniqueHosts := make(map[string]HostInfo) // host -> ssh-port, os, arch
 	globalOptions := topo.GlobalOptions
 	topo.IterInstance(func(inst meta.Instance) {
 		if _, found := uniqueHosts[inst.GetHost()]; !found {
-			uniqueHosts[inst.GetHost()] = hostInfo{
-				ssh:  inst.GetSSHPort(),
-				os:   inst.OS(),
-				arch: inst.Arch(),
+			uniqueHosts[inst.GetHost()] = HostInfo{
+				SSH:  inst.GetSSHPort(),
+				OS:   inst.OS(),
+				Arch: inst.Arch(),
 			}
 			var dirs []string
 			for _, dir := range []string{globalOptions.DeployDir, globalOptions.LogDir} {
@@ -282,6 +277,18 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 		// intend to never return error
 		return nil
 	}).BuildAsStep("Check status").SetHidden(true)
+
+	// Deploy monitor relevant components to remote
+	dlTasks, dpTasks := prepare.BuildMonitoredDeployTask(
+		clusterName,
+		uniqueHosts,
+		globalOptions,
+		topo.MonitoredOptions,
+		clusterVersion,
+		gOpt,
+	)
+	downloadCompTasks = append(downloadCompTasks, dlTasks...)
+	deployCompTasks = append(deployCompTasks, dpTasks...)
 	if report.Enable() {
 		deployCompTasks = append(deployCompTasks, nodeInfoTask)
 	}

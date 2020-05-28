@@ -67,12 +67,7 @@ type (
 		usePassword  bool   // use password instead of identity file for ssh connection
 	}
 
-	hostInfo struct {
-		ssh  int    // ssh port of host
-		os   string // operating system
-		arch string // cpu architecture
-		// vendor string
-	}
+	HostInfo = prepare.HostInfo
 )
 
 func newDeploy() *cobra.Command {
@@ -194,7 +189,7 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 	)
 
 	// Initialize environment
-	uniqueHosts := make(map[string]hostInfo) // host -> ssh-port, os, arch
+	uniqueHosts := make(map[string]HostInfo) // host -> ssh-port, os, arch
 	globalOptions := topo.GlobalOptions
 	var iterErr error // error when itering over instances
 	iterErr = nil
@@ -209,10 +204,10 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 				return // skip the host to avoid issues
 			}
 
-			uniqueHosts[inst.GetHost()] = hostInfo{
-				ssh:  inst.GetSSHPort(),
-				os:   inst.OS(),
-				arch: inst.Arch(),
+			uniqueHosts[inst.GetHost()] = HostInfo{
+				SSH:  inst.GetSSHPort(),
+				OS:   inst.OS(),
+				Arch: inst.Arch(),
 			}
 			var dirs []string
 			for _, dir := range []string{globalOptions.DeployDir, globalOptions.LogDir} {
@@ -299,12 +294,13 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 	}).BuildAsStep("Check status").SetHidden(true)
 
 	// Deploy monitor relevant components to remote
-	dlTasks, dpTasks := buildMonitoredDeployTask(
+	dlTasks, dpTasks := prepare.BuildMonitoredDeployTask(
 		clusterName,
 		uniqueHosts,
 		globalOptions,
 		topo.MonitoredOptions,
 		clusterVersion,
+		gOpt,
 	)
 	downloadCompTasks = append(downloadCompTasks, dlTasks...)
 	deployCompTasks = append(deployCompTasks, dpTasks...)
@@ -345,72 +341,4 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 	hint := color.New(color.Bold).Sprintf("%s start %s", cliutil.OsArgs0(), clusterName)
 	log.Infof("Deployed cluster `%s` successfully, you can start the cluster via `%s`", clusterName, hint)
 	return nil
-}
-
-func buildMonitoredDeployTask(
-	clusterName string,
-	uniqueHosts map[string]hostInfo, // host -> ssh-port, os, arch
-	globalOptions meta.GlobalOptions,
-	monitoredOptions meta.MonitoredOptions,
-	version string,
-) (downloadCompTasks []*task.StepDisplay, deployCompTasks []*task.StepDisplay) {
-	uniqueCompOSArch := make(map[string]struct{}) // comp-os-arch -> {}
-	// monitoring agents
-	for _, comp := range []string{meta.ComponentNodeExporter, meta.ComponentBlackboxExporter} {
-		version := meta.ComponentVersion(comp, version)
-
-		for host, info := range uniqueHosts {
-			// populate unique os/arch set
-			key := fmt.Sprintf("%s-%s-%s", comp, info.os, info.arch)
-			if _, found := uniqueCompOSArch[key]; !found {
-				uniqueCompOSArch[key] = struct{}{}
-				downloadCompTasks = append(downloadCompTasks, task.NewBuilder().
-					Download(comp, info.os, info.arch, version).
-					BuildAsStep(fmt.Sprintf("  - Download %s:%s (%s/%s)", comp, version, info.os, info.arch)))
-			}
-
-			deployDir := clusterutil.Abs(globalOptions.User, monitoredOptions.DeployDir)
-			// data dir would be empty for components which don't need it
-			dataDir := monitoredOptions.DataDir
-			// the default data_dir is relative to deploy_dir
-			if dataDir != "" && !strings.HasPrefix(dataDir, "/") {
-				dataDir = filepath.Join(deployDir, dataDir)
-			}
-			// log dir will always be with values, but might not used by the component
-			logDir := clusterutil.Abs(globalOptions.User, monitoredOptions.LogDir)
-			// Deploy component
-			t := task.NewBuilder().
-				UserSSH(host, info.ssh, globalOptions.User, gOpt.SSHTimeout).
-				Mkdir(globalOptions.User, host,
-					deployDir, dataDir, logDir,
-					filepath.Join(deployDir, "bin"),
-					filepath.Join(deployDir, "conf"),
-					filepath.Join(deployDir, "scripts")).
-				CopyComponent(
-					comp,
-					info.os,
-					info.arch,
-					version,
-					host,
-					deployDir,
-				).
-				MonitoredConfig(
-					clusterName,
-					comp,
-					host,
-					globalOptions.ResourceControl,
-					monitoredOptions,
-					globalOptions.User,
-					meta.DirPaths{
-						Deploy: deployDir,
-						Data:   []string{dataDir},
-						Log:    logDir,
-						Cache:  meta.ClusterPath(clusterName, meta.TempConfigPath),
-					},
-				).
-				BuildAsStep(fmt.Sprintf("  - Copy %s -> %s", comp, host))
-			deployCompTasks = append(deployCompTasks, t)
-		}
-	}
-	return
 }
