@@ -113,7 +113,7 @@ func scaleOut(clusterName, topoFile string, opt scaleOutOptions) error {
 	})
 	if !skipConfirm {
 		// patchedComponents are components that have been patched and overwrited
-		if err := confirmTopology(clusterName, metadata.Version, &newPart, patchedComponents); err != nil {
+		if err := prepare.ConfirmTopology(clusterName, metadata.Version, &newPart, patchedComponents); err != nil {
 			return err
 		}
 	}
@@ -174,7 +174,7 @@ func buildScaleOutTask(
 		initializedHosts.Insert(instance.GetHost())
 	})
 	// uninitializedHosts are hosts which haven't been initialized yet
-	uninitializedHosts := make(map[string]HostInfo) // host -> ssh-port, os, arch
+	uninitializedHosts := make(map[string]hostInfo) // host -> ssh-port, os, arch
 	var iterErr error                               // error when itering over instances
 	iterErr = nil
 	newPart.IterInstance(func(instance meta.Instance) {
@@ -192,7 +192,7 @@ func buildScaleOutTask(
 				return // skip the host to avoid issues
 			}
 
-			uninitializedHosts[host] = HostInfo{
+			uninitializedHosts[host] = hostInfo{
 				SSH:  instance.GetSSHPort(),
 				OS:   instance.OS(),
 				Arch: instance.Arch(),

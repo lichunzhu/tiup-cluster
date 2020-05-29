@@ -14,18 +14,12 @@
 package command
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path"
-
 	"github.com/joomcode/errorx"
+	"github.com/pingcap-incubator/tiup-cluster/pkg/cliutil/prepare"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/clusterutil"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/meta"
 	operator "github.com/pingcap-incubator/tiup-cluster/pkg/operation"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/task"
-	"github.com/pingcap-incubator/tiup-cluster/pkg/utils"
-	"github.com/pingcap-incubator/tiup/pkg/set"
 	tiuputils "github.com/pingcap-incubator/tiup/pkg/utils"
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
@@ -75,11 +69,11 @@ func patch(clusterName, packagePath string, options operator.Options, overwrite 
 		return err
 	}
 
-	insts, err := instancesToPatch(metadata, options)
+	insts, err := prepare.InstancesToPatch(metadata.Topology, options)
 	if err != nil {
 		return err
 	}
-	if err := checkPackage(clusterName, insts[0].ComponentName(), packagePath); err != nil {
+	if err := prepare.CheckPackage(clusterName, insts[0].ComponentName(), insts[0].OS(), insts[0].Arch(), packagePath, prepare.CmdCluster); err != nil {
 		return err
 	}
 
@@ -110,88 +104,10 @@ func patch(clusterName, packagePath string, options operator.Options, overwrite 
 	}
 
 	if overwrite {
-		if err := overwritePatch(clusterName, insts[0].ComponentName(), packagePath); err != nil {
+		if err := prepare.OverwritePatch(clusterName, insts[0].ComponentName(), packagePath); err != nil {
 			return err
 		}
 	}
 
-	return nil
-}
-
-func instancesToPatch(metadata *meta.ClusterMeta, options operator.Options) ([]meta.Instance, error) {
-	roleFilter := set.NewStringSet(options.Roles...)
-	nodeFilter := set.NewStringSet(options.Nodes...)
-	components := metadata.Topology.ComponentsByStartOrder()
-	components = operator.FilterComponent(components, roleFilter)
-
-	instances := []meta.Instance{}
-	comps := []string{}
-	for _, com := range components {
-		insts := operator.FilterInstance(com.Instances(), nodeFilter)
-		if len(insts) > 0 {
-			comps = append(comps, com.Name())
-		}
-		instances = append(instances, insts...)
-	}
-	if len(comps) > 1 {
-		return nil, fmt.Errorf("can't patch more than one component at once: %v", comps)
-	}
-
-	if len(instances) == 0 {
-		return nil, fmt.Errorf("no instance found on specifid role(%v) and nodes(%v)", options.Roles, options.Nodes)
-	}
-
-	return instances, nil
-}
-
-func checkPackage(clusterName, comp, packagePath string) error {
-	metadata, err := meta.ClusterMetadata(clusterName)
-	if err != nil {
-		return err
-	}
-	manifest, err := meta.TiupEnv().Repository().ComponentVersions(comp)
-	if err != nil {
-		return err
-	}
-	ver := meta.ComponentVersion(comp, metadata.Version)
-	versionInfo, found := manifest.FindVersion(ver)
-	if !found {
-		return fmt.Errorf("cannot found version %v in %s manifest", ver, comp)
-	}
-
-	checksum, err := utils.Checksum(packagePath)
-	if err != nil {
-		return err
-	}
-	cacheDir := meta.ClusterPath(clusterName, "cache", comp+"-"+checksum[:7])
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return err
-	}
-	if err := exec.Command("tar", "-xvf", packagePath, "-C", cacheDir).Run(); err != nil {
-		return err
-	}
-
-	if exists := tiuputils.IsExist(path.Join(cacheDir, versionInfo.Entry)); !exists {
-		return fmt.Errorf("entry %s not found in package %s", versionInfo.Entry, packagePath)
-	}
-
-	return nil
-}
-
-func overwritePatch(clusterName, comp, packagePath string) error {
-	if err := os.MkdirAll(meta.ClusterPath(clusterName, meta.PatchDirName), 0755); err != nil {
-		return err
-	}
-	checksum, err := utils.Checksum(packagePath)
-	if err != nil {
-		return err
-	}
-	tg := meta.ClusterPath(clusterName, meta.PatchDirName, comp+"-"+checksum[:7]+".tar.gz")
-	if err := utils.CopyFile(packagePath, tg); err != nil {
-		return err
-	}
-	if err := os.Symlink(tg, meta.ClusterPath(clusterName, meta.PatchDirName, comp+".tar.gz")); err != nil {
-		return err
-	}
 	return nil
 }

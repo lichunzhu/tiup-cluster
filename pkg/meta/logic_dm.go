@@ -127,7 +127,7 @@ func (i *DMMasterInstance) InitConfig(e executor.TiOpsExecutor, clusterName, clu
 		return err
 	}
 
-	return checkConfig(e, i.ComponentName(), clusterVersion, i.ComponentName()+".toml", paths)
+	return checkConfig(e, i.ComponentName(), i.OS(), i.Arch(), clusterVersion, i.ComponentName()+".toml", paths)
 }
 
 // ScaleConfig deploy temporary config on scaling
@@ -392,14 +392,17 @@ func (topo *DMSpecification) GetMonitoredOptions() MonitoredOptions {
 	return topo.MonitoredOptions
 }
 
+// GetMonitors returns Monitors
 func (topo *DMSpecification) GetMonitors() []PrometheusSpec {
 	return topo.Monitors
 }
 
+// GetGrafana returns Grafana
 func (topo *DMSpecification) GetGrafana() []GrafanaSpec {
 	return topo.Grafana
 }
 
+// GetAlertManager returns Alertmanager
 func (topo *DMSpecification) GetAlertManager() []AlertManagerSpec {
 	return topo.Alertmanager
 }

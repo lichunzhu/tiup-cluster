@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/pingcap-incubator/tiup/pkg/version"
+
 	"github.com/joomcode/errorx"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/clusterutil"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/log"
@@ -24,7 +26,6 @@ import (
 	"github.com/pingcap-incubator/tiup-cluster/pkg/meta"
 	operator "github.com/pingcap-incubator/tiup-cluster/pkg/operation"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/task"
-	"github.com/pingcap-incubator/tiup/pkg/repository"
 	"github.com/pingcap-incubator/tiup/pkg/utils"
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
@@ -52,7 +53,7 @@ func newUpgradeCmd() *cobra.Command {
 
 func versionCompare(curVersion, newVersion string) error {
 	// Can always upgrade to 'nightly' event the current version is 'nightly'
-	if repository.Version(newVersion).IsNightly() {
+	if newVersion == version.NightlyVersion {
 		return nil
 	}
 

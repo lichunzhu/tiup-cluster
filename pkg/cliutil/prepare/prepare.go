@@ -17,17 +17,19 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/fatih/color"
+	"github.com/pingcap-incubator/tiup-cluster/pkg/log"
+	"github.com/pingcap-incubator/tiup-cluster/pkg/utils"
+	"github.com/pingcap-incubator/tiup/pkg/set"
 
 	"github.com/joomcode/errorx"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/cliutil"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/clusterutil"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/errutil"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/meta"
-	operator "github.com/pingcap-incubator/tiup-cluster/pkg/operation"
-	"github.com/pingcap-incubator/tiup-cluster/pkg/task"
 	tiuputils "github.com/pingcap-incubator/tiup/pkg/utils"
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
@@ -38,6 +40,11 @@ var (
 	errNSDeploy           = errNS.NewSubNamespace("deploy")
 	errDeployDirConflict  = errNSDeploy.NewType("dir_conflict", errutil.ErrTraitPreCheck)
 	errDeployPortConflict = errNSDeploy.NewType("port_conflict", errutil.ErrTraitPreCheck)
+
+	// CmdCluster specifies the command is cluster
+	CmdCluster = "cluster"
+	// CmdDM specifies the command is dm
+	CmdDM = "dm"
 )
 
 func fixDir(topo meta.Specification) func(string) string {
@@ -281,99 +288,47 @@ Please change to use another port or another host.
 	return nil
 }
 
-// BuildDownloadCompTasks build download component tasks
-func BuildDownloadCompTasks(version string, topo meta.Specification) []*task.StepDisplay {
-	var tasks []*task.StepDisplay
-	uniqueTaskList := make(map[string]struct{}) // map["comp-os-arch"]{}
-	topo.IterInstance(func(inst meta.Instance) {
-		key := fmt.Sprintf("%s-%s-%s", inst.ComponentName(), inst.OS(), inst.Arch())
-		if _, found := uniqueTaskList[key]; !found {
-			uniqueTaskList[key] = struct{}{}
+// ConfirmTopology confirms topology's for user
+func ConfirmTopology(clusterName, version string, topo meta.Specification, patchedRoles set.StringSet) error {
+	log.Infof("Please confirm your topology:")
 
-			version := meta.ComponentVersion(inst.ComponentName(), version)
-			t := task.
-				NewBuilder().
-				Download(inst.ComponentName(), inst.OS(), inst.Arch(), version).
-				BuildAsStep(fmt.Sprintf("  - Download %s:%s (%s/%s)",
-					inst.ComponentName(), version, inst.OS(), inst.Arch()))
-			tasks = append(tasks, t)
-		}
-	})
-	return tasks
-}
-
-type HostInfo struct {
-	SSH  int    // ssh port of host
-	OS   string // operating system
-	Arch string // cpu architecture
-	// vendor string
-}
-
-func BuildMonitoredDeployTask(
-	clusterName string,
-	uniqueHosts map[string]HostInfo, // host -> ssh-port, os, arch
-	globalOptions meta.GlobalOptions,
-	monitoredOptions meta.MonitoredOptions,
-	version string,
-	gOpt operator.Options,
-) (downloadCompTasks []*task.StepDisplay, deployCompTasks []*task.StepDisplay) {
-	uniqueCompOSArch := make(map[string]struct{}) // comp-os-arch -> {}
-	// monitoring agents
-	for _, comp := range []string{meta.ComponentNodeExporter, meta.ComponentBlackboxExporter} {
-		version := meta.ComponentVersion(comp, version)
-
-		for host, info := range uniqueHosts {
-			// populate unique os/arch set
-			key := fmt.Sprintf("%s-%s-%s", comp, info.OS, info.Arch)
-			if _, found := uniqueCompOSArch[key]; !found {
-				uniqueCompOSArch[key] = struct{}{}
-				downloadCompTasks = append(downloadCompTasks, task.NewBuilder().
-					Download(comp, info.OS, info.Arch, version).
-					BuildAsStep(fmt.Sprintf("  - Download %s:%s (%s/%s)", comp, version, info.OS, info.Arch)))
-			}
-
-			deployDir := clusterutil.Abs(globalOptions.User, monitoredOptions.DeployDir)
-			// data dir would be empty for components which don't need it
-			dataDir := monitoredOptions.DataDir
-			// the default data_dir is relative to deploy_dir
-			if dataDir != "" && !strings.HasPrefix(dataDir, "/") {
-				dataDir = filepath.Join(deployDir, dataDir)
-			}
-			// log dir will always be with values, but might not used by the component
-			logDir := clusterutil.Abs(globalOptions.User, monitoredOptions.LogDir)
-			// Deploy component
-			t := task.NewBuilder().
-				UserSSH(host, info.SSH, globalOptions.User, gOpt.SSHTimeout).
-				Mkdir(globalOptions.User, host,
-					deployDir, dataDir, logDir,
-					filepath.Join(deployDir, "bin"),
-					filepath.Join(deployDir, "conf"),
-					filepath.Join(deployDir, "scripts")).
-				CopyComponent(
-					comp,
-					info.OS,
-					info.Arch,
-					version,
-					host,
-					deployDir,
-				).
-				MonitoredConfig(
-					clusterName,
-					comp,
-					host,
-					globalOptions.ResourceControl,
-					monitoredOptions,
-					globalOptions.User,
-					meta.DirPaths{
-						Deploy: deployDir,
-						Data:   []string{dataDir},
-						Log:    logDir,
-						Cache:  meta.ClusterPath(clusterName, meta.TempConfigPath),
-					},
-				).
-				BuildAsStep(fmt.Sprintf("  - Copy %s -> %s", comp, host))
-			deployCompTasks = append(deployCompTasks, t)
-		}
+	var component string
+	if topoCluster := topo.GetClusterSpecification(); topoCluster != nil {
+		component = "TiDB"
+	} else if topoDM := topo.GetDMSpecification(); topoDM != nil {
+		component = "DM"
 	}
-	return
+	cyan := color.New(color.FgCyan, color.Bold)
+	fmt.Printf("%s Cluster: %s\n", component, cyan.Sprint(clusterName))
+	fmt.Printf("%s Version: %s\n", component, cyan.Sprint(version))
+
+	clusterTable := [][]string{
+		// Header
+		{"Type", "Host", "Ports", "OS/Arch", "Directories"},
+	}
+
+	topo.IterInstance(func(instance meta.Instance) {
+		comp := instance.ComponentName()
+		if patchedRoles.Exist(comp) {
+			comp = comp + " (patched)"
+		}
+		clusterTable = append(clusterTable, []string{
+			comp,
+			instance.GetHost(),
+			utils.JoinInt(instance.UsedPorts(), "/"),
+			cliutil.OsArch(instance.OS(), instance.Arch()),
+			strings.Join(instance.UsedDirs(), ","),
+		})
+	})
+
+	cliutil.PrintTable(clusterTable, true)
+
+	log.Warnf("Attention:")
+	log.Warnf("    1. If the topology is not what you expected, check your yaml file.")
+	log.Warnf("    2. Please confirm there is no port/directory conflicts in same host.")
+	if len(patchedRoles) != 0 {
+		log.Errorf("    3. The component marked as `patched` has been replaced by previours patch command.")
+	}
+
+	return cliutil.PromptForConfirmOrAbortError("Do you want to continue? [y/N]: ")
 }

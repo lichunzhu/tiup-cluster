@@ -76,7 +76,7 @@ func init() {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			var env *tiupmeta.Environment
-			if err = meta.Initialize("cluster"); err != nil {
+			if err = meta.Initialize("dm"); err != nil {
 				return err
 			}
 			// Running in other OS/ARCH Should be fine we only download manifest file.
@@ -98,7 +98,7 @@ func init() {
 			return cmd.Help()
 		},
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-			return meta.TiupEnv().Repository().Mirror().Close()
+			return meta.TiupEnv().V1Repository().Mirror().Close()
 		},
 	}
 

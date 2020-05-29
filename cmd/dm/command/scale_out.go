@@ -73,18 +73,24 @@ func scaleOut(clusterName, topoFile string, opt scaleOutOptions) error {
 		return errors.Errorf("cannot scale-out non-exists cluster %s", clusterName)
 	}
 
-	var newPart meta.DMTopologySpecification
+	metadata, err := meta.DMMetadata(clusterName)
+	if err != nil {
+		return err
+	}
+
+	// Inherit existing global configuration. We must assign the inherited values before unmarshalling
+	// because some default value rely on the global options and monitored options.
+	var newPart = meta.DMTopologySpecification{
+		GlobalOptions:    metadata.Topology.GlobalOptions,
+		MonitoredOptions: metadata.Topology.MonitoredOptions,
+		ServerConfigs:    metadata.Topology.ServerConfigs,
+	}
 	if err := utils.ParseTopologyYaml(topoFile, &newPart); err != nil {
 		return err
 	}
 
 	if data, err := ioutil.ReadFile(topoFile); err == nil {
 		teleTopology = string(data)
-	}
-
-	metadata, err := meta.DMMetadata(clusterName)
-	if err != nil {
-		return err
 	}
 
 	// Abort scale out operation if the merged topology is invalid
@@ -108,15 +114,10 @@ func scaleOut(clusterName, topoFile string, opt scaleOutOptions) error {
 	})
 	if !skipConfirm {
 		// patchedComponents are components that have been patched and overwrited
-		if err := confirmTopology(clusterName, metadata.Version, &newPart, patchedComponents); err != nil {
+		if err := prepare.ConfirmTopology(clusterName, metadata.Version, &newPart, patchedComponents); err != nil {
 			return err
 		}
 	}
-
-	// Inherit existing global configuration
-	newPart.GlobalOptions = metadata.Topology.GlobalOptions
-	newPart.MonitoredOptions = metadata.Topology.MonitoredOptions
-	newPart.ServerConfigs = metadata.Topology.ServerConfigs
 
 	sshConnProps, err := cliutil.ReadIdentityFileOrPassword(opt.identityFile, opt.usePassword)
 	if err != nil {
@@ -157,7 +158,7 @@ func buildScaleOutTask(
 	mergedTopo *meta.DMSpecification,
 	opt scaleOutOptions,
 	sshConnProps *cliutil.SSHConnectionProps,
-	newPart meta.Specification,
+	newPart *meta.DMSpecification,
 	patchedComponents set.StringSet,
 	timeout int64,
 ) (task.Task, error) {
@@ -174,14 +175,14 @@ func buildScaleOutTask(
 		initializedHosts.Insert(instance.GetHost())
 	})
 	// uninitializedHosts are hosts which haven't been initialized yet
-	uninitializedHosts := make(map[string]HostInfo) // host -> ssh-port, os, arch
+	uninitializedHosts := make(map[string]hostInfo) // host -> ssh-port, os, arch
 	newPart.IterInstance(func(instance meta.Instance) {
 		if host := instance.GetHost(); !initializedHosts.Exist(host) {
 			if _, found := uninitializedHosts[host]; found {
 				return
 			}
 
-			uninitializedHosts[host] = HostInfo{
+			uninitializedHosts[host] = hostInfo{
 				SSH:  instance.GetSSHPort(),
 				OS:   instance.OS(),
 				Arch: instance.Arch(),
@@ -325,6 +326,7 @@ func buildScaleOutTask(
 			Roles:      []string{meta.ComponentPrometheus},
 			OptTimeout: timeout,
 		})
+		// .UpdateTopology(clusterName, metadata, nil) update dm topology in telemetry here in the future
 
 	return builder.Build(), nil
 }

@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap-incubator/tiup-cluster/pkg/task"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/telemetry"
 	"github.com/pingcap-incubator/tiup-cluster/pkg/utils"
-	"github.com/pingcap-incubator/tiup/pkg/repository"
 	"github.com/pingcap-incubator/tiup/pkg/set"
 	tiuputils "github.com/pingcap-incubator/tiup/pkg/utils"
 	"github.com/pingcap/errors"
@@ -58,7 +57,7 @@ var (
 type (
 	componentInfo struct {
 		component string
-		version   repository.Version
+		version   string
 	}
 
 	deployOptions struct {
@@ -67,7 +66,7 @@ type (
 		usePassword  bool   // use password instead of identity file for ssh connection
 	}
 
-	HostInfo = prepare.HostInfo
+	hostInfo = prepare.HostInfo
 )
 
 func newDeploy() *cobra.Command {
@@ -100,44 +99,6 @@ func newDeploy() *cobra.Command {
 	return cmd
 }
 
-func confirmTopology(clusterName, version string, topo *meta.DMTopologySpecification, patchedRoles set.StringSet) error {
-	log.Infof("Please confirm your topology:")
-
-	cyan := color.New(color.FgCyan, color.Bold)
-	fmt.Printf("DM Cluster: %s\n", cyan.Sprint(clusterName))
-	fmt.Printf("DM Version: %s\n", cyan.Sprint(version))
-
-	clusterTable := [][]string{
-		// Header
-		{"Type", "Host", "Ports", "OS/Arch", "Directories"},
-	}
-
-	topo.IterInstance(func(instance meta.Instance) {
-		comp := instance.ComponentName()
-		if patchedRoles.Exist(comp) {
-			comp = comp + " (patched)"
-		}
-		clusterTable = append(clusterTable, []string{
-			comp,
-			instance.GetHost(),
-			utils.JoinInt(instance.UsedPorts(), "/"),
-			cliutil.OsArch(instance.OS(), instance.Arch()),
-			strings.Join(instance.UsedDirs(), ","),
-		})
-	})
-
-	cliutil.PrintTable(clusterTable, true)
-
-	log.Warnf("Attention:")
-	log.Warnf("    1. If the topology is not what you expected, check your yaml file.")
-	log.Warnf("    2. Please confirm there is no port/directory conflicts in same host.")
-	if len(patchedRoles) != 0 {
-		log.Errorf("    3. The component marked as `patched` has been replaced by previours patch command.")
-	}
-
-	return cliutil.PromptForConfirmOrAbortError("Do you want to continue? [y/N]: ")
-}
-
 func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) error {
 	if err := utils.ValidateClusterNameOrError(clusterName); err != nil {
 		return err
@@ -166,7 +127,7 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 	}
 
 	if !skipConfirm {
-		if err := confirmTopology(clusterName, clusterVersion, &topo, set.NewStringSet()); err != nil {
+		if err := prepare.ConfirmTopology(clusterName, clusterVersion, &topo, set.NewStringSet()); err != nil {
 			return err
 		}
 	}
@@ -189,11 +150,11 @@ func deploy(clusterName, clusterVersion, topoFile string, opt deployOptions) err
 	)
 
 	// Initialize environment
-	uniqueHosts := make(map[string]HostInfo) // host -> ssh-port, os, arch
+	uniqueHosts := make(map[string]hostInfo) // host -> ssh-port, os, arch
 	globalOptions := topo.GlobalOptions
 	topo.IterInstance(func(inst meta.Instance) {
 		if _, found := uniqueHosts[inst.GetHost()]; !found {
-			uniqueHosts[inst.GetHost()] = HostInfo{
+			uniqueHosts[inst.GetHost()] = hostInfo{
 				SSH:  inst.GetSSHPort(),
 				OS:   inst.OS(),
 				Arch: inst.Arch(),
