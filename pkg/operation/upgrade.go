@@ -14,6 +14,7 @@
 package operator
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -125,8 +126,9 @@ func Upgrade(
 						}
 
 						if len(dmSpec.Masters) > 1 && leader == instance.(*meta.DMMasterInstance).Name {
-							if err := dmMasterClient.EvictDMMasterLeader(timeoutOpt); err != nil {
-								return errors.Annotatef(err, "failed to dm-master PD leader %s", instance.GetHost())
+							addr := fmt.Sprintf("%s:%d", instance.GetHost(), instance.GetPort())
+							if err := dmMasterClient.EvictDMMasterLeader(addr, timeoutOpt); err != nil {
+								return errors.Annotatef(err, "failed to dm-master leader %s", instance.GetHost())
 							}
 						}
 

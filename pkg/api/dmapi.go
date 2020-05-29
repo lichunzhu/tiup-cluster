@@ -29,6 +29,7 @@ import (
 
 var (
 	dmMembersURI = "apis/v1alpha1/members"
+	dmLeaderURI  = "apis/v1alpha1/leader"
 
 	defaultRetryOpt = &utils.RetryOption{
 		Delay:   time.Second * 5,
@@ -247,8 +248,26 @@ func (dm *DMMasterClient) GetRegisteredMembers() ([]string, []string, error) {
 }
 
 // EvictDMMasterLeader evicts the dm master leader
-func (dm *DMMasterClient) EvictDMMasterLeader(retryOpt *utils.RetryOption) error {
-	return nil
+func (dm *DMMasterClient) EvictDMMasterLeader(addr string, retryOpt *utils.RetryOption) error {
+	endpoint := fmt.Sprintf("%s/%s", dm.GetURL(addr), dmLeaderURI+"/1")
+	return utils.Retry(func() error {
+		return tryURLs([]string{endpoint}, func(endpoint string) error {
+			body, statusCode, err := dm.httpClient.Put(endpoint, nil)
+
+			if statusCode == 404 {
+				zap.L().Debug("leader to evict does not exist, ignore.")
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			resp := string(body)
+			if strings.Contains(resp, "result:true") {
+				return nil
+			}
+			return errors.Errorf("evict dm master leader failed: %s", resp)
+		})
+	}, *retryOpt)
 }
 
 // OfflineMember offlines the member of dm cluster

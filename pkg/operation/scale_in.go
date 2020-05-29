@@ -368,6 +368,13 @@ func ScaleInDMCluster(
 				continue
 			}
 
+			if component.Name() == meta.ComponentDMMaster {
+				addr := fmt.Sprintf("%s:%d", instance.GetHost(), instance.GetPort())
+				if err := dmMasterClient.EvictDMMasterLeader(addr, retryOpt); err != nil {
+					return errors.Annotatef(err, "failed to dm-master leader %s", instance.GetHost())
+				}
+			}
+
 			if err := StopComponent(getter, []meta.Instance{instance}); err != nil {
 				return errors.Annotatef(err, "failed to stop %s", component.Name())
 			}

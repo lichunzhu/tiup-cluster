@@ -64,10 +64,10 @@ func (c *HTTPClient) Post(url string, body io.Reader) ([]byte, error) {
 	return checkHTTPResponse(res)
 }
 
-// Delete send a DELETE request to the url and returns the response and status code.
-func (c *HTTPClient) Delete(url string, body io.Reader) ([]byte, int, error) {
+// Do send a http request to the url and returns the response
+func (c *HTTPClient) Do(opt, url string, body io.Reader) ([]byte, int, error) {
 	var statusCode int
-	req, err := http.NewRequest("DELETE", url, body)
+	req, err := http.NewRequest(opt, url, body)
 	if err != nil {
 		return nil, statusCode, err
 	}
@@ -80,6 +80,16 @@ func (c *HTTPClient) Delete(url string, body io.Reader) ([]byte, int, error) {
 	b, err := checkHTTPResponse(res)
 	statusCode = res.StatusCode
 	return b, statusCode, err
+}
+
+// Put send a PUT request to the url and returns the response
+func (c *HTTPClient) Put(url string, body io.Reader) ([]byte, int, error) {
+	return c.Do("PUT", url, body)
+}
+
+// Delete send a DELETE request to the url and returns the response and status code.
+func (c *HTTPClient) Delete(url string, body io.Reader) ([]byte, int, error) {
+	return c.Do("DELETE", url, body)
 }
 
 // checkHTTPResponse checks if an HTTP response is with normal status codes
